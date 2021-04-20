@@ -1,3 +1,8 @@
+import os
+import io
+import tarfile
+
+
 import pandas as pd
 import h5py
 import yaml
@@ -13,8 +18,14 @@ STR_TO_STRUCTURE = {
 }
 
 
-def datasources_from_yaml_stream(stream):
+def databundle_from_yaml_stream(stream):
     conf = yaml.safe_load(stream)
+
+    serializer = Serializer(
+        conf["serializer"]["output_filename"],
+        conf["serializer"].get("backend_name", "hdf5"),
+        conf["serializer"].get("backend_parameters", {})
+    )
 
     data_loaders = {
         "flat_file": SourceFlatFile
@@ -22,9 +33,9 @@ def datasources_from_yaml_stream(stream):
 
     for source in conf["sources"]:
         # Get the right data loader.
-        dl = data_loaders[source.pop("type")](**source)
-        dl.load()
-        print(dl._payload)
+        ds = data_loaders[source.pop("type")](**source)
+        ds.load()
+        serializer.serialize(ds)
 
 
 def long_data_postprocessing(df, index_col=None, variable_col=None,
@@ -65,22 +76,112 @@ def default_cols(inferred_columns, user_specified_columns):
     return out
 
 
+class Serializer(object):
+    """Class to persist state when serializing different data sources.
+
+    The goal of the current package is to allow many dataframes to be loaded
+    from heterogenous sources and serialized to a single file so this class
+    coordinates writes to the appropriate file depending on the backend.
+
+    """
+    def __init__(self, output_filename, backend_name, backend_parameters=None):
+        self.output_filename = output_filename
+        self.backend_name = backend_name
+
+        self.backend_parameters = {}
+        if backend_parameters is not None:
+            self.backend_parameters.update(backend_parameters)
+
+        self.backend_init(backend_name)
+
+
+    def backend_init(self, name):
+        """Dispatches to the different initialization functions.
+
+        For hdf5: removes file if already exist.
+        For parquet: creates a tarball in which the different sources will
+            be serialized.
+
+        Also makes sure the backend is known.
+
+        """
+        if name == "hdf5":
+            self._init_hdf5()
+        elif name == "parquet":
+            self._init_tar_backend()
+        else:
+            raise ValueError(f"Unknown backend '{name}'.")
+
+    def _init_hdf5(self):
+        if not (self.output_filename.endswith(".h5") or 
+                self.output_filename.endswith(".hdf5")):
+            self.output_filename += ".h5"
+
+        try:
+            with open(self.output_filename, "r"):
+                pass
+            os.remove(self.output_filename)
+        except FileNotFoundError:
+            pass
+
+
+    def _init_tar_backend(self):
+        if not self.output_filename.endswith(".tar"):
+            self.output_filename += ".tar"
+
+        # Create or overwrite the file.
+        tar = tarfile.open(self.output_filename, "w")
+        tar.close()
+
+    def serialize(self, data_source):
+        if self.backend_name == "hdf5":
+            data_source._payload.to_hdf(
+                self.output_filename,
+                key=data_source.name,
+                **self.backend_parameters
+            )
+
+        elif self.backend_name == "parquet":
+            buf = io.BytesIO()
+            data_source._payload.to_parquet(buf, **self.backend_parameters)
+            self._write_buf_to_tar(data_source.name, buf, suffix=".parquet")
+
+        else:
+            raise ValueError(
+                "Unsupported backend for serialization: '{}'."
+                "".format(self.backend_name)
+            )
+
+    def _write_buf_to_tar(self, ds_name, buf, suffix=""):
+        # Determine buf length.
+        buf.seek(0, 2)
+        buf_len = buf.tell()
+        buf.seek(0)
+
+        # Create file info.
+        tar_component = tarfile.TarInfo(f"{ds_name}{suffix}")
+        tar_component.size = buf_len
+
+        # Write to the actual tar file
+        with tarfile.open(self.output_filename, mode="a") as tar:
+            tar.addfile(tar_component, buf)
+
+
 class DataSource(object):
     def __init__(self, name, structure, structure_parameters=None,
-                 source_parameters=None):
+                 source_parameters=None, backend_parameters=None):
 
         self.metadata = {
             "structure": STR_TO_STRUCTURE[structure.lower()]
         }
         self.name = name
 
-
         self.structure_parameters = {}
         if structure_parameters is not None:
             self.structure_parameters = structure_parameters
 
         self.source_parameters = {}
-        if source_parameters:
+        if source_parameters is not None:
             self.source_parameters = source_parameters
 
         self._payload = None
@@ -107,32 +208,6 @@ class DataSource(object):
             self._payload = sparse_data_postprocessing(
                 self._payload, **self.structure_parameters
             )
-
-        # Compute the missigness matrix.
-        self._missing = self._encode_missing()
-
-    def _encode_missing(self, sparse=True):
-        # For dense matrices, we can either store NaNs as a dense binary matrix
-        # or in the "long/tidy" format.
-        # This is controlled by the sparse parameter.
-        df = self._payload
-        if self.metadata["structure"] == "dense":
-            if sparse:
-                t = df.melt(id_vars="sample_id")
-                return t.loc[t["value"].isnull(), ["sample_id", "variable"]]
-            else:
-                return df.isna().values
-
-        elif self.metadata["structure"] == "sparse":
-            # Return an numpy array of missing samples.
-            return df.loc[df.iloc[:, 1].isna(), :].iloc[:, 0].values
-
-        elif self.metadata["structure"] == "long":
-            # Return a data frame of (sample_id, variable_id).
-            return df.loc[df.iloc[:, 2].isna(), :].iloc[:, [0, 1]]
-
-    def serialize(self):
-
 
 
 class SourcePsycopg2(DataSource):

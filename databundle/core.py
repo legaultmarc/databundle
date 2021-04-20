@@ -142,9 +142,11 @@ class Serializer(object):
             )
 
         elif self.backend_name == "parquet":
-            buf = io.BytesIO()
-            data_source._payload.to_parquet(buf, **self.backend_parameters)
-            self._write_buf_to_tar(data_source.name, buf, suffix=".parquet")
+            data = data_source._payload.to_parquet(
+                path=None, **self.backend_parameters
+            )
+            self._write_buf_to_tar(data_source.name, io.BytesIO(data),
+                                   suffix=".parquet")
 
         else:
             raise ValueError(

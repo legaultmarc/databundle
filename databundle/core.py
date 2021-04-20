@@ -1,6 +1,7 @@
 import os
 import io
 import tarfile
+import tempfile
 
 
 import pandas as pd
@@ -76,6 +77,20 @@ def default_cols(inferred_columns, user_specified_columns):
     return out
 
 
+def infer_parquet_engine(config):
+    import pandas.io.parquet
+    engine_str = config.get("engine", "auto")
+    engine_impl = pandas.io.parquet.get_engine(engine_str)
+
+    if type(engine_impl) is pandas.io.parquet.PyArrowImpl:
+        return "pyarrow"
+
+    if type(engine_impl) is pandas.io.parquet.FastParquetImpl:
+        return "fastparquet"
+
+    raise ValueError("Could not infer parquet engine.")
+
+
 class Serializer(object):
     """Class to persist state when serializing different data sources.
 
@@ -142,11 +157,22 @@ class Serializer(object):
             )
 
         elif self.backend_name == "parquet":
-            data = data_source._payload.to_parquet(
-                path=None, **self.backend_parameters
-            )
-            self._write_buf_to_tar(data_source.name, io.BytesIO(data),
-                                   suffix=".parquet")
+            engine = infer_parquet_engine(self.backend_parameters)
+
+            if engine == "pyarrow":
+                buf = io.BytesIO(data_source._payload.to_parquet(
+                    path=None, **self.backend_parameters
+                ))
+                self._write_buf_to_tar(data_source.name, buf,
+                                       suffix=".parquet")
+            else:
+                # fastparquet does not support in memory serialization, so we
+                # need to create a temporary file.
+                with tempfile.NamedTemporaryFile("w+b") as f:
+                    data_source._payload.to_parquet(path=f.name,
+                                                    **self.backend_parameters)
+                    self._write_buf_to_tar(data_source.name, f,
+                                           suffix=".parquet")
 
         else:
             raise ValueError(

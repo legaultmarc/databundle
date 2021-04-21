@@ -8,16 +8,6 @@ import pandas as pd
 import yaml
 
 
-# Defines some known synonym and valid input values.
-STR_TO_STRUCTURE = {
-    "sparse": "sparse",
-    "dense": "dense",
-    "wide": "dense",
-    "tidy": "long",
-    "long": "long",
-}
-
-
 def databundle_from_yaml_stream(stream):
     conf = yaml.safe_load(stream)
 
@@ -45,18 +35,6 @@ def databundle_from_yaml_stream(stream):
         ds = data_loaders[source.pop("type")](**source)
         ds.load()
         serde.serialize(ds)
-
-
-def default_cols(inferred_columns, user_specified_columns):
-    """Allows customization of column names for expected columns for data
-       formats with semantics (sparse or long)."""
-    out = []
-    for inferred_col, user_col in zip(inferred_columns, user_specified_columns):
-        if user_col is None:
-            out.append(inferred_col)
-        else:
-            out.append(user_col)
-    return out
 
 
 class Serde(object):
@@ -204,10 +182,7 @@ class DataSource(object):
     def __init__(self, name, structure=None, structure_parameters=None,
                  source_parameters=None, backend_parameters=None):
 
-        self.metadata = {
-            "structure": STR_TO_STRUCTURE[structure.lower()]
-                         if structure is not None else structure
-        }
+        self.metadata = {}
         self.name = name
 
         self.structure_parameters = {}
@@ -241,7 +216,7 @@ class SourcePsycopg2(DataSource):
         # dbname and sql are mandatory we take the others as options.
         self.metadata["dbname"] = source_parameters.pop("dbname")
         self.metadata["sql"] = source_parameters.pop("sql")
-
+        self.metadata["dtype"] = source_parameters.pop("dtype", None)
         self.metadata["db_kwargs"] = source_parameters
 
     def load(self):
@@ -253,6 +228,9 @@ class SourcePsycopg2(DataSource):
             colnames = [desc[0] for desc in cur.description]
             self._payload = pd.DataFrame(cur.fetchall(), columns=colnames)
 
+        if self.metadata["dtype"] is not None:
+            self._payload = self._payload.astype(self.metadata["dtype"])
+
         super().load()
 
 
@@ -263,10 +241,12 @@ class SourceFlatFile(DataSource):
         super().__init__(name, structure, structure_parameters,
                          source_parameters)
 
-        self.metadata["filename"] = source_parameters["filename"]
-        self.metadata["delimiter"] = source_parameters.get("delimiter", ",")
+        self.metadata["filename"] = source_parameters.pop("filename")
+        self.metadata["delimiter"] = source_parameters.pop("delimiter", ",")
+        self.metadata["source_parameters"] = source_parameters
 
     def load(self):
         self._payload = pd.read_csv(self.metadata["filename"],
-                                    sep=self.metadata["delimiter"])
+                                    sep=self.metadata["delimiter"],
+                                    **self.metadata["source_parameters"])
         super().load()

@@ -47,34 +47,6 @@ def databundle_from_yaml_stream(stream):
         serde.serialize(ds)
 
 
-def long_data_postprocessing(df, index_col=None, variable_col=None,
-                             value_col=None):
-    """Rearrange the columns to comply with the expected structure.
-
-    Long data is always represented by: sample_col, variable_col and
-    value_col.
-
-    """
-    cols = default_cols(
-        df.columns,
-        [index_col, variable_col, value_col]
-    )
-
-    if len(set(cols)) != len(cols):
-        raise ValueError("Can't interpret data source as long dataset.")
-
-    return df[cols]
-
-
-def sparse_data_postprocessing(df, index_col=None, value_col=None):
-    cols = default_cols(df.columns, [index_col, value_col])
-
-    if len(set(cols)) != len(cols):
-        raise ValueError("Can't interpret data source as sparse dataset.")
-
-    return df[cols]
-
-
 def default_cols(inferred_columns, user_specified_columns):
     """Allows customization of column names for expected columns for data
        formats with semantics (sparse or long)."""
@@ -253,23 +225,10 @@ class DataSource(object):
 
         Children are responsible for populating _payload.
 
-        This function will do the conversions and missigness handling if
-        necessary.
-
         """
         if self._payload is None:
             raise RuntimeError("Children need to populate payload before "
                                "calling DataSource.load().")
-
-        if self.metadata["structure"] == "long":
-            self._payload = long_data_postprocessing(
-                self._payload, **self.structure_parameters
-            )
-
-        if self.metadata["structure"] == "sparse":
-            self._payload = sparse_data_postprocessing(
-                self._payload, **self.structure_parameters
-            )
 
 
 class SourcePsycopg2(DataSource):

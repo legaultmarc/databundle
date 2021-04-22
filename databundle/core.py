@@ -195,13 +195,18 @@ class ParquetSerde(Serde):
                                        suffix=".parquet")
 
     def deserialize(self, data_source_name=None):
+        suffix = ".parquet"
+        strip_suffix = lambda w: w[:-len(suffix)]
+
         with tarfile.open(self.output_filename, mode="r") as tar:
+            # When deserializing everything, we strip the suffix from the dict
+            # keys.
             if data_source_name is None:
                 out = {}
                 names = tar.getnames()
                 for key in names:
                     data = tar.extractfile(key)
-                    out[key] = pd.read_parquet(data)
+                    out[strip_suffix(key)] = pd.read_parquet(data)
 
                 return out
 

@@ -2,10 +2,11 @@
 
 ``databundle`` facilitates the aggregation of **tabular** data across variable
 sources (flat files, PostgreSQL databases). It generates a single file that
-contains various data sources.
+contains the combined data from all sources stored in an efficient format.
 
-The serialization format is flexible (for now either HDF5 of parquet) and
-allows for efficient data loading and storage.
+For now, both HDF5 and parquet can be used for serialization which allows for
+efficient storage, fast data loading and interoperability across many
+programming languages.
 
 ### Use cases
 

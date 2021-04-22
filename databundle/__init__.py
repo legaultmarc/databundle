@@ -1,4 +1,9 @@
-from .core import databundle_from_yaml_stream, HDF5Serde, ParquetSerde
+from .core import (
+    databundle_from_yaml_stream,
+    HDF5Serde,
+    ParquetSerde,
+    get_serde_from_filename
+)
 
 
 def databundle_from_yaml(filename):

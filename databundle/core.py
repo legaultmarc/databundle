@@ -37,6 +37,41 @@ def databundle_from_yaml_stream(stream):
         serde.serialize(ds)
 
 
+def get_serde_from_filename(db_filename):
+    """Infer and instantiate correct Serde subclass given a databundle."""
+    Serde = None
+
+    if db_filename.endswith(".h5"):
+        Serde = HDF5Serde
+
+    elif db_filename.endswith(".tar"):
+        backend = _infer_serde_backend_from_tar(db_filename)
+        if backend == "parquet":
+            Serde = ParquetSerde
+
+    if Serde is None:
+        raise ValueError("Could not infer databundle backend.")
+
+    return Serde(db_filename)
+
+
+def _infer_serde_backend_from_tar(tar_filename):
+    with tarfile.open(tar_filename, mode="r") as tar:
+        names = tar.getnames()
+
+    suffixes = set((ds.split(".")[-1] for ds in names
+                    if not ds.startswith("metadata")))
+
+    if len(suffixes) != 1:
+        return None
+
+    suffix = suffixes.pop()
+    if suffix == "parquet":
+        return "parquet"
+
+    return None
+
+
 class Serde(object):
     """Class to persist state when serializing different data sources.
 

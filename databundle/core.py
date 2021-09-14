@@ -199,7 +199,7 @@ class ParquetSerde(Serde):
 
     def keys(self):
         with tarfile.open(self.output_filename, mode="r") as tar:
-            return tar.getnames()
+            return [ds.replace(".parquet", "") for ds in tar.getnames()]
 
     def deserialize(self, data_source_name=None):
         suffix = ".parquet"

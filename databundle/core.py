@@ -96,6 +96,9 @@ class Serde(object):
     def deserialize(self, data_source_name=None):
         raise NotImplementedError()
 
+    def keys(self):
+        raise NotImplementedError()
+
     def _init_tar_backend(self):
         """Utility function for serializers that use tarballs to aggregate
         files."""
@@ -193,6 +196,10 @@ class ParquetSerde(Serde):
                                                 **self.backend_parameters)
                 self._write_buf_to_tar(data_source.name, f,
                                        suffix=".parquet")
+
+    def keys(self):
+        with tarfile.open(self.output_filename, mode="r") as tar:
+            return tar.getnames()
 
     def deserialize(self, data_source_name=None):
         suffix = ".parquet"
